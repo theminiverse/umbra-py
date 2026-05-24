@@ -19,6 +19,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `umbra map` CLI subcommand: search the catalog and write an interactive
   HTML map (`--out footprints.html`) or a GeoJSON FeatureCollection
   (`--out footprints.geojson`) to disk.
+- `UmbraItem.asset_href` now resolves empty hrefs in recent Umbra STAC
+  items. Umbra currently publishes every asset with `"href": ""` and
+  expects consumers to reconstruct the URL from `umbra:task_id` and a
+  rename mapping (`<base>_MM.tif` -> `<base>_GEC.tif`, etc.). Items with
+  populated hrefs are returned unchanged, so older catalogs and the
+  offline test fixture keep working. Unblocks live downloads and the SAR
+  image overlay against 2024+ items.
 - SAR image overlays on the Folium map.
   - `image_overlay(item)`: stream a downsampled preview of an item's GEC
     cloud-optimized GeoTIFF via HTTP range requests (no full download),

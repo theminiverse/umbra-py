@@ -1,7 +1,7 @@
 import pytest
 
 from umbra_py.exceptions import AssetNotFoundError
-from umbra_py.models import UmbraItem, _bbox_from_geometry
+from umbra_py.models import UmbraItem, _bbox_from_geometry, _derive_data_url
 
 
 def test_from_dict_parses_real_item(sample_item_dict):
@@ -51,3 +51,72 @@ def test_summary_is_readable(sample_item_dict):
 def test_metadata_summary_keys(sample_item_dict):
     summary = UmbraItem.from_dict(sample_item_dict).metadata_summary()
     assert set(summary) >= {"id", "datetime", "product_type", "bbox", "available_assets"}
+
+
+@pytest.mark.parametrize(
+    "key,disk_suffix",
+    [
+        ("2025-06-22-23-57-52_UMBRA-10_MM.tif", "_GEC.tif"),
+        ("2025-06-22-23-57-52_UMBRA-10_CSI_MM.tif", "_CSI.tif"),
+        ("2025-06-22-23-57-52_UMBRA-10_CSI_SIDD_MM.nitf", "_CSI-SIDD.nitf"),
+        ("2025-06-22-23-57-52_UMBRA-10_SICD_MM.nitf", "_SICD.nitf"),
+        ("2025-06-22-23-57-52_UMBRA-10_SIDD_MM.nitf", "_SIDD.nitf"),
+        ("2025-06-22-23-57-52_UMBRA-10_MM.cphd", "_CPHD.cphd"),
+    ],
+)
+def test_derive_data_url_maps_v1_suffixes(key, disk_suffix):
+    url = _derive_data_url(key, task_id="task-abc")
+    assert url is not None
+    base = "2025-06-22-23-57-52_UMBRA-10"
+    expected_tail = f"/sar-data/tasks/task-abc/{base}/{base}{disk_suffix}"
+    assert url.endswith(expected_tail), url
+
+
+def test_derive_data_url_returns_none_for_unrecognised_keys():
+    assert _derive_data_url("something_METADATA.json", task_id="t") is None
+    assert _derive_data_url("plain.txt", task_id="t") is None
+
+
+def _new_style_item():
+    return UmbraItem.from_dict(
+        {
+            "id": "demo",
+            "geometry": None,
+            "bbox": [0, 0, 1, 1],
+            "properties": {
+                "sar:product_type": "GEC",
+                "umbra:task_id": "task-abc",
+            },
+            "assets": {
+                "2025-06-22-23-57-52_UMBRA-10_MM.tif": {
+                    "href": "",
+                    "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                    "title": "GEC",
+                },
+                "2025-06-22-23-57-52_UMBRA-10_SICD_MM.nitf": {
+                    "href": "",
+                    "type": "application/octet-stream",
+                    "title": "SICD",
+                },
+            },
+        }
+    )
+
+
+def test_asset_href_resolves_empty_href_via_task_id():
+    item = _new_style_item()
+    gec = item.asset_href("GEC")
+    assert gec.startswith("https://s3.")
+    assert "/sar-data/tasks/task-abc/" in gec
+    assert gec.endswith("/2025-06-22-23-57-52_UMBRA-10/2025-06-22-23-57-52_UMBRA-10_GEC.tif")
+
+    sicd = item.asset_href("SICD")
+    assert sicd.endswith("/2025-06-22-23-57-52_UMBRA-10_SICD.nitf")
+
+
+def test_asset_href_falls_back_to_empty_without_task_id():
+    # Same item shape but no umbra:task_id -> nothing we can derive.
+    raw = _new_style_item().raw
+    raw["properties"] = {"sar:product_type": "GEC"}
+    item = UmbraItem.from_dict(raw)
+    assert item.asset_href("GEC") == ""

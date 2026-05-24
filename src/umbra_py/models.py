@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .constants import METADATA_ASSET, PRODUCT_ASSETS
+from .constants import METADATA_ASSET, PRODUCT_ASSETS, S3_BUCKET, S3_REGION
 from .exceptions import AssetNotFoundError
 
 # (min_lon, min_lat, max_lon, max_lat)
@@ -88,6 +88,38 @@ def _bbox_from_geometry(geometry: dict | None) -> BBox | None:
 
 def _bbox_overlaps(a: BBox, b: BBox) -> bool:
     return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+# Current Umbra STAC items publish every asset with href="". The asset *key*
+# is the v1-style filename (e.g. "<base>_MM.tif"); the actual file on S3 lives
+# at sar-data/tasks/<umbra:task_id>/<base>/<base>_<PRODUCT>.<ext>. The map
+# below converts the v1 suffix to the on-disk suffix. Longest entries first so
+# "_CSI_SIDD_MM" doesn't get eaten by the "_MM" rule.
+_V1_TO_DISK_SUFFIX: tuple[tuple[str, str], ...] = (
+    ("_CSI_SIDD_MM.nitf", "_CSI-SIDD.nitf"),
+    ("_SICD_MM.nitf", "_SICD.nitf"),
+    ("_SIDD_MM.nitf", "_SIDD.nitf"),
+    ("_CSI_MM.tif", "_CSI.tif"),
+    ("_MM.cphd", "_CPHD.cphd"),
+    ("_MM.tif", "_GEC.tif"),
+)
+
+
+def _derive_data_url(key: str, task_id: str) -> str | None:
+    """Reconstruct the public-bucket URL for an asset whose STAC href is empty.
+
+    Returns ``None`` when ``key`` doesn't end in any of the recognised v1
+    suffixes (e.g. sidecar metadata files), so the caller can fall back to
+    the original empty href rather than building a wrong URL.
+    """
+    for v1, disk in _V1_TO_DISK_SUFFIX:
+        if key.endswith(v1):
+            base = key[: -len(v1)]
+            return (
+                f"https://s3.{S3_REGION}.amazonaws.com/{S3_BUCKET}"
+                f"/sar-data/tasks/{task_id}/{base}/{base}{disk}"
+            )
+    return None
 
 
 @dataclass
@@ -198,15 +230,30 @@ class UmbraItem:
         return [name for name in PRODUCT_ASSETS if name in present]
 
     def asset_href(self, name: str) -> str:
-        """Return the download URL for a product type (``"GEC"``) or asset key."""
+        """Return the download URL for a product type (``"GEC"``) or asset key.
+
+        Recent Umbra STAC items publish every asset with ``href=""``; when that
+        happens we reconstruct the public-bucket URL from ``umbra:task_id`` and
+        the asset key's v1 naming convention. Older items with populated hrefs
+        are returned unchanged.
+        """
         key = self.asset_map.get(name, name)
         try:
-            return self.assets[key]["href"]
+            asset = self.assets[key]
         except KeyError as exc:
             available = ", ".join(self.available_assets) or "none"
             raise AssetNotFoundError(
                 f"Item {self.id!r} has no asset {name!r}. Available: {available}."
             ) from exc
+        href = asset.get("href") or ""
+        if href:
+            return href
+        task_id = self.properties.get("umbra:task_id")
+        if task_id:
+            derived = _derive_data_url(key, task_id)
+            if derived is not None:
+                return derived
+        return href
 
     def has_asset(self, name: str) -> bool:
         return name in self.asset_map or name in self.assets
