@@ -1,4 +1,4 @@
-"""Command-line interface: ``umbra search | info | download``."""
+"""Command-line interface: ``umbra search | info | download | map``."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from .constants import DATA_LICENSE, PRODUCT_ASSETS
 from .download import download_item
 from .exceptions import UmbraError
 from .models import UmbraItem
+from .viz import save_footprint_map, write_geojson
 
 
 def _parse_bbox(value: str | None) -> tuple[float, float, float, float] | None:
@@ -57,7 +58,14 @@ def cli() -> None:
 )
 @click.option("--limit", type=int, default=20, show_default=True, help="Max results.")
 @click.option("--json", "as_json", is_flag=True, help="Emit full STAC item JSON.")
-def search(bbox, start, end, products, limit, as_json) -> None:
+@click.option(
+    "--available-only",
+    is_flag=True,
+    help="Only return items whose binary data is actually downloadable "
+    "from the public bucket (most v1 STAC items reference data that was "
+    "never published).",
+)
+def search(bbox, start, end, products, limit, as_json, available_only) -> None:
     """Search the catalog by area, date and product type."""
     catalog = UmbraCatalog()
     results = catalog.search(
@@ -66,6 +74,7 @@ def search(bbox, start, end, products, limit, as_json) -> None:
         end=end,
         product_types=list(products) or None,
         limit=limit,
+        data_available_only=available_only,
     )
     found = 0
     for item in results:
@@ -113,6 +122,66 @@ def download(item_url, assets, dest, overwrite) -> None:
             item, dest, assets=[name], overwrite=overwrite, progress=_progress_printer(name)
         )[0]
         click.echo(f"\n  -> {path}")
+
+
+@cli.command(name="map")
+@click.option("--bbox", help="Footprint filter: 'min_lon,min_lat,max_lon,max_lat'.")
+@click.option("--start", help="Earliest acquisition date (YYYY-MM-DD).")
+@click.option("--end", help="Latest acquisition date (YYYY-MM-DD).")
+@click.option(
+    "--product",
+    "products",
+    multiple=True,
+    type=click.Choice(PRODUCT_ASSETS, case_sensitive=False),
+    help="Keep items exposing this asset (repeatable).",
+)
+@click.option("--limit", type=int, default=100, show_default=True, help="Max results to plot.")
+@click.option(
+    "--out",
+    "out_path",
+    required=True,
+    help="Output file. '.html' writes an interactive Folium map (requires the "
+    "viz extra); '.geojson' / '.json' writes a GeoJSON FeatureCollection.",
+)
+@click.option(
+    "--imagery",
+    is_flag=True,
+    help="Overlay each item's GEC SAR image on the map (HTML output only; "
+    "needs the viz extra including rasterio).",
+)
+@click.option(
+    "--available-only",
+    is_flag=True,
+    help="Only include items whose binary data is actually downloadable.",
+)
+def map_cmd(bbox, start, end, products, limit, out_path, imagery, available_only) -> None:
+    """Render search results as an interactive map or GeoJSON file."""
+    catalog = UmbraCatalog()
+    items = list(
+        catalog.search(
+            bbox=_parse_bbox(bbox),
+            start=start,
+            end=end,
+            product_types=list(products) or None,
+            limit=limit,
+            data_available_only=available_only,
+        )
+    )
+    if not items:
+        raise click.ClickException("No items matched the search.")
+
+    lower = out_path.lower()
+    if lower.endswith((".geojson", ".json")):
+        if imagery:
+            raise click.ClickException("--imagery only applies to HTML map output.")
+        path = write_geojson(items, out_path)
+    elif lower.endswith(".html") or lower.endswith(".htm"):
+        path = save_footprint_map(items, out_path, imagery=imagery)
+    else:
+        raise click.ClickException(
+            "Unrecognized output extension. Use .html for a map or .geojson for data."
+        )
+    click.echo(f"Wrote {len(items)} footprint(s) to {path}")
 
 
 def main() -> None:

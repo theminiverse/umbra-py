@@ -23,6 +23,14 @@ from .exceptions import (
     UmbraError,
 )
 from .models import UmbraItem
+from .viz import (
+    footprint_map,
+    image_overlay,
+    item_to_feature,
+    items_to_featurecollection,
+    save_footprint_map,
+    write_geojson,
+)
 
 __all__ = [
     "__version__",
@@ -39,4 +47,10 @@ __all__ = [
     "AssetNotFoundError",
     "DownloadError",
     "MissingDependencyError",
+    "item_to_feature",
+    "items_to_featurecollection",
+    "write_geojson",
+    "footprint_map",
+    "save_footprint_map",
+    "image_overlay",
 ]
