@@ -135,7 +135,13 @@ def download(item_url, assets, dest, overwrite) -> None:
     help="Output file. '.html' writes an interactive Folium map (requires the "
     "viz extra); '.geojson' / '.json' writes a GeoJSON FeatureCollection.",
 )
-def map_cmd(bbox, start, end, products, limit, out_path) -> None:
+@click.option(
+    "--imagery",
+    is_flag=True,
+    help="Overlay each item's GEC SAR image on the map (HTML output only; "
+    "needs the viz extra including rasterio).",
+)
+def map_cmd(bbox, start, end, products, limit, out_path, imagery) -> None:
     """Render search results as an interactive map or GeoJSON file."""
     catalog = UmbraCatalog()
     items = list(
@@ -152,9 +158,11 @@ def map_cmd(bbox, start, end, products, limit, out_path) -> None:
 
     lower = out_path.lower()
     if lower.endswith((".geojson", ".json")):
+        if imagery:
+            raise click.ClickException("--imagery only applies to HTML map output.")
         path = write_geojson(items, out_path)
     elif lower.endswith(".html") or lower.endswith(".htm"):
-        path = save_footprint_map(items, out_path)
+        path = save_footprint_map(items, out_path, imagery=imagery)
     else:
         raise click.ClickException(
             "Unrecognized output extension. Use .html for a map or .geojson for data."

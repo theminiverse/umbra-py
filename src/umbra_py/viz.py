@@ -7,6 +7,11 @@ This module turns ``UmbraItem`` objects into:
 - **Interactive Folium maps** (requires the ``viz`` extra) — drop-in HTML
   for notebooks or sharing, with one polygon per acquisition and a popup
   showing each item's metadata and an "open" link.
+- **SAR image overlays** on top of those maps (requires ``viz`` + rasterio):
+  ``image_overlay`` and ``footprint_map(..., imagery=True)`` stream a
+  downsampled preview of the GEC asset via HTTP range requests and
+  composite it onto the basemap. Self-contained — the resulting HTML
+  embeds the image as a base64 PNG, no tile server required.
 
 The first surface is the important one: Umbra acquisitions are points on
 the planet, and being able to *see* where a search landed before
@@ -26,7 +31,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from .exceptions import MissingDependencyError
+from .exceptions import AssetNotFoundError, MissingDependencyError
 from .models import UmbraItem
 
 
@@ -167,12 +172,20 @@ def footprint_map(
     weight: int = 2,
     fill_opacity: float = 0.15,
     zoom_start: int | None = None,
+    imagery: bool = False,
+    imagery_kwargs: dict[str, Any] | None = None,
 ):
     """Build an interactive Folium map of one or more Umbra acquisitions.
 
     The map auto-fits the union of footprints and renders each item as a
     polygon with a metadata popup. Items without a geometry or bbox are
     silently skipped.
+
+    When ``imagery=True``, each item's GEC asset is streamed (via HTTP
+    range requests against the cloud-optimized GeoTIFF) and overlaid on
+    the basemap. Items lacking a GEC asset are skipped silently; this
+    needs ``rasterio`` (already in the ``viz`` extra). Pass per-overlay
+    options via ``imagery_kwargs`` (e.g. ``{"max_size": 2048}``).
 
     Requires the ``viz`` extra (``pip install "umbra-py[viz]"``). Returns
     a ``folium.Map`` you can ``.save("out.html")`` or display in Jupyter.
@@ -191,6 +204,14 @@ def footprint_map(
 
     m = folium.Map(location=center, tiles=tiles, zoom_start=zoom_start or 2)
 
+    if imagery:
+        ik = imagery_kwargs or {}
+        for item, _ in features:
+            try:
+                image_overlay(item, **ik).add_to(m)
+            except AssetNotFoundError:
+                continue
+
     for item, geometry in features:
         folium.GeoJson(
             {"type": "Feature", "geometry": geometry, "properties": {}},
@@ -208,6 +229,95 @@ def footprint_map(
         m.fit_bounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
 
     return m
+
+
+def _stretch_to_rgba(data: Any, *, percentile: tuple[float, float] = (2.0, 98.0)) -> Any:
+    """Convert a 2D array of SAR amplitudes to an RGBA uint8 image.
+
+    SAR data has enormous dynamic range; a straight 0-255 scaling looks
+    almost black. We compute the low/high cut on positive, finite values
+    only, clip the rest to that range, and rescale. Pixels that were
+    invalid (NaN / nodata / non-positive) become fully transparent so the
+    basemap shows through scene edges.
+    """
+    np = _require("numpy")
+    arr = np.asarray(data)
+    invalid = ~np.isfinite(arr) | (arr <= 0)
+    valid = arr[~invalid]
+    if valid.size == 0:
+        raise ValueError("Image has no valid pixels to stretch.")
+    lo, hi = np.percentile(valid, percentile)
+    if hi <= lo:
+        hi = lo + 1.0
+    # Replace invalid pixels with lo before the uint8 cast so NaN values
+    # don't trigger numpy's "invalid value encountered in cast" warning;
+    # they're set fully transparent below regardless.
+    safe = np.where(invalid, lo, arr)
+    scaled = np.clip((safe - lo) / (hi - lo) * 255.0, 0, 255).astype("uint8")
+    rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype="uint8")
+    rgba[..., 0] = scaled
+    rgba[..., 1] = scaled
+    rgba[..., 2] = scaled
+    rgba[..., 3] = np.where(invalid, 0, 255).astype("uint8")
+    return rgba
+
+
+def image_overlay(
+    item: UmbraItem,
+    *,
+    asset: str = "GEC",
+    max_size: int = 1024,
+    percentile: tuple[float, float] = (2.0, 98.0),
+    opacity: float = 1.0,
+):
+    """Build a Folium ``ImageOverlay`` of an item's SAR image.
+
+    Reads a downsampled preview of the cloud-optimized GeoTIFF via HTTP
+    range requests (only the bytes for the requested resolution are
+    fetched), applies a percentile contrast stretch for SAR amplitude,
+    reprojects to lat/lon if necessary, and embeds the result as a base64
+    PNG so the resulting map stays a single self-contained HTML file.
+
+    Requires the ``viz`` extra (which pulls in rasterio + numpy; Pillow
+    comes transitively via matplotlib).
+    """
+    folium = _require("folium")
+    rasterio = _require("rasterio")
+    _require("numpy")
+    _require("PIL")
+
+    import base64  # noqa: PLC0415
+    import io  # noqa: PLC0415
+
+    from PIL import Image  # noqa: PLC0415
+    from rasterio.enums import Resampling  # noqa: PLC0415
+    from rasterio.vrt import WarpedVRT  # noqa: PLC0415
+
+    url = item.asset_href(asset)
+    with rasterio.open(f"/vsicurl/{url}") as src:
+        epsg = src.crs.to_epsg() if src.crs else None
+        wrap = WarpedVRT(src, crs="EPSG:4326") if epsg != 4326 else None
+        ds = wrap if wrap is not None else src
+        try:
+            scale = max(max(ds.width, ds.height) / max_size, 1.0)
+            out_w = max(int(ds.width / scale), 1)
+            out_h = max(int(ds.height / scale), 1)
+            data = ds.read(1, out_shape=(out_h, out_w), resampling=Resampling.average)
+            bounds = ds.bounds
+        finally:
+            if wrap is not None:
+                wrap.close()
+
+    rgba = _stretch_to_rgba(data, percentile=percentile)
+    buf = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
+    data_uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    return folium.raster_layers.ImageOverlay(
+        image=data_uri,
+        bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+        opacity=opacity,
+    )
 
 
 def save_footprint_map(

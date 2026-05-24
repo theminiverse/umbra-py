@@ -25,6 +25,7 @@ from .exceptions import (
 from .models import UmbraItem
 from .viz import (
     footprint_map,
+    image_overlay,
     item_to_feature,
     items_to_featurecollection,
     save_footprint_map,
@@ -51,4 +52,5 @@ __all__ = [
     "write_geojson",
     "footprint_map",
     "save_footprint_map",
+    "image_overlay",
 ]

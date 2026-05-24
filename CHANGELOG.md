@@ -19,6 +19,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `umbra map` CLI subcommand: search the catalog and write an interactive
   HTML map (`--out footprints.html`) or a GeoJSON FeatureCollection
   (`--out footprints.geojson`) to disk.
+- SAR image overlays on the Folium map.
+  - `image_overlay(item)`: stream a downsampled preview of an item's GEC
+    cloud-optimized GeoTIFF via HTTP range requests (no full download),
+    apply a percentile contrast stretch to handle SAR's wide dynamic
+    range, reproject to lat/lon if needed, and return a Folium
+    `ImageOverlay` ready to drop onto any map.
+  - `footprint_map(items, imagery=True)` / `umbra map --imagery`: one-call
+    convenience that combines footprints with the SAR imagery. Each
+    overlay is embedded as a base64 PNG so the resulting HTML file is
+    self-contained — no tile server required.
+  - The `viz` extra now also pulls in `rasterio` and `numpy` for the
+    image-overlay path; folium-only users are unaffected.
 
 ## [0.1.0] - 2026-05-22
 

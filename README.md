@@ -78,6 +78,12 @@ items = list(UmbraCatalog().search(start="2024-01-01", end="2024-01-31", limit=5
 # Interactive Folium map for notebooks / sharing (requires the `viz` extra).
 footprint_map(items).save("footprints.html")
 
+# Same map, with the actual SAR imagery overlaid. Streams a downsampled
+# preview of each GEC cloud-optimized GeoTIFF via HTTP range requests —
+# no full download — and embeds the result inline so the HTML is
+# self-contained.
+footprint_map(items, imagery=True).save("sar_map.html")
+
 # Or export to GeoJSON for QGIS, leafmap, Earth Engine, geopandas, deck.gl, ...
 write_geojson(items, "footprints.geojson")
 ```
@@ -97,6 +103,9 @@ umbra download <item-json-url> --asset GEC --dest downloads/
 # Visualize search results: interactive HTML map or GeoJSON for any GIS.
 umbra map --start 2024-01-01 --end 2024-01-31 --product GEC --out footprints.html
 umbra map --start 2024-01-01 --end 2024-01-31 --product GEC --out footprints.geojson
+
+# Same, but overlay the actual SAR imagery on the basemap.
+umbra map --start 2024-01-01 --end 2024-01-31 --product GEC --imagery --out sar_map.html
 ```
 
 ## What the data looks like

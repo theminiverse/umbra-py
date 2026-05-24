@@ -81,6 +81,43 @@ def test_write_geojson_roundtrip(tmp_path, sample_item_dict):
     assert data["features"][0]["id"] == item.id
 
 
+def test_stretch_to_rgba_percentile_stretch():
+    np = pytest.importorskip("numpy")
+    from umbra_py.viz import _stretch_to_rgba
+
+    # A linear ramp 0..99: the 2nd percentile ~= 2, 98th ~= 97.
+    data = np.arange(100, dtype="float32").reshape(10, 10)
+    rgba = _stretch_to_rgba(data, percentile=(2, 98))
+
+    assert rgba.shape == (10, 10, 4)
+    assert rgba.dtype.name == "uint8"
+    # The very low pixel was clipped to zero (or near it); the high pixel maxed out.
+    assert rgba[0, 0, 0] == 0
+    assert rgba[-1, -1, 0] == 255
+    # All visible pixels have full alpha; the zero pixel was treated as invalid.
+    assert rgba[0, 0, 3] == 0  # value 0 is non-positive -> transparent
+    assert rgba[5, 5, 3] == 255
+
+
+def test_stretch_to_rgba_marks_invalid_pixels_transparent():
+    np = pytest.importorskip("numpy")
+    from umbra_py.viz import _stretch_to_rgba
+
+    data = np.array([[1.0, 2.0, 3.0], [np.nan, 4.0, 5.0]], dtype="float32")
+    rgba = _stretch_to_rgba(data)
+    assert rgba[1, 0, 3] == 0  # NaN -> transparent
+    assert rgba[0, 0, 3] == 255  # finite positive -> opaque
+
+
+def test_stretch_to_rgba_all_invalid_raises():
+    np = pytest.importorskip("numpy")
+    from umbra_py.viz import _stretch_to_rgba
+
+    data = np.zeros((4, 4), dtype="float32")  # all non-positive -> all invalid
+    with pytest.raises(ValueError):
+        _stretch_to_rgba(data)
+
+
 def test_footprint_map_without_extra_raises(monkeypatch, sample_item_dict):
     # Simulate folium not being installed.
     import builtins
