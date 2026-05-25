@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `UmbraCatalog.search(max_per_task=N)` (and `--max-per-task N` on `umbra
+  search` / `umbra map`): cap how many items are yielded from any one
+  `sar-data/tasks/<task>/` directory. Each task is repeated imaging of
+  the same area, so `--max-per-task 1` swaps the usual "every revisit of
+  a few sites" output for "one acquisition per distinct site" — much
+  better diversity on a map.
+
 ### Changed
 - **Breaking:** `UmbraCatalog.search` now walks Umbra's live data layout
   at `sar-data/tasks/<task>/[<uuid>/]<acquisition>/` (each acquisition has

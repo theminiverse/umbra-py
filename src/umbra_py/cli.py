@@ -57,8 +57,16 @@ def cli() -> None:
     help="Keep items exposing this asset (repeatable).",
 )
 @click.option("--limit", type=int, default=20, show_default=True, help="Max results.")
+@click.option(
+    "--max-per-task",
+    type=int,
+    default=None,
+    help="Cap items per Umbra task directory. Each task is repeated imaging "
+    "of the same area, so '--max-per-task 1' returns one item per distinct "
+    "site rather than every revisit.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit full STAC item JSON.")
-def search(bbox, start, end, products, limit, as_json) -> None:
+def search(bbox, start, end, products, limit, max_per_task, as_json) -> None:
     """Search the catalog by area, date and product type."""
     catalog = UmbraCatalog()
     results = catalog.search(
@@ -67,6 +75,7 @@ def search(bbox, start, end, products, limit, as_json) -> None:
         end=end,
         product_types=list(products) or None,
         limit=limit,
+        max_per_task=max_per_task,
     )
     found = 0
     for item in results:
@@ -141,7 +150,15 @@ def download(item_url, assets, dest, overwrite) -> None:
     help="Overlay each item's GEC SAR image on the map (HTML output only; "
     "needs the viz extra including rasterio).",
 )
-def map_cmd(bbox, start, end, products, limit, out_path, imagery) -> None:
+@click.option(
+    "--max-per-task",
+    type=int,
+    default=None,
+    help="Cap items per Umbra task directory. Each task is repeated imaging "
+    "of the same area, so '--max-per-task 1' returns one item per distinct "
+    "site rather than every revisit.",
+)
+def map_cmd(bbox, start, end, products, limit, out_path, imagery, max_per_task) -> None:
     """Render search results as an interactive map or GeoJSON file."""
     catalog = UmbraCatalog()
     items = list(
@@ -151,6 +168,7 @@ def map_cmd(bbox, start, end, products, limit, out_path, imagery) -> None:
             end=end,
             product_types=list(products) or None,
             limit=limit,
+            max_per_task=max_per_task,
         )
     )
     if not items:

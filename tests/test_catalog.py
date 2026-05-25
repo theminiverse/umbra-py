@@ -157,6 +157,55 @@ def test_search_limit(fake_bucket):
     assert len(items) == 1
 
 
+def test_search_max_per_task_caps_revisits(monkeypatch):
+    """max_per_task yields at most N items per top-level task -- one per
+    distinct site rather than every revisit, for map diversity."""
+    monkeypatch.setattr(
+        UmbraCatalog,
+        "_list_prefix",
+        lambda self, prefix: (["sar-data/tasks/site-a/", "sar-data/tasks/site-b/"], []),
+    )
+    # Two revisits at site-a, one acquisition at site-b.
+    task_keys = {
+        "sar-data/tasks/site-a/": [
+            "sar-data/tasks/site-a/2024-01-15-10-00-00_UMBRA-04/2024-01-15-10-00-00_UMBRA-04.stac.v2.json",
+            "sar-data/tasks/site-a/2024-01-15-10-00-00_UMBRA-04/2024-01-15-10-00-00_UMBRA-04_GEC.tif",
+            "sar-data/tasks/site-a/2024-02-20-10-00-00_UMBRA-04/2024-02-20-10-00-00_UMBRA-04.stac.v2.json",
+            "sar-data/tasks/site-a/2024-02-20-10-00-00_UMBRA-04/2024-02-20-10-00-00_UMBRA-04_GEC.tif",
+        ],
+        "sar-data/tasks/site-b/": [
+            "sar-data/tasks/site-b/2024-03-10-10-00-00_UMBRA-09/2024-03-10-10-00-00_UMBRA-09.stac.v2.json",
+            "sar-data/tasks/site-b/2024-03-10-10-00-00_UMBRA-09/2024-03-10-10-00-00_UMBRA-09_GEC.tif",
+        ],
+    }
+    monkeypatch.setattr(UmbraCatalog, "_stream_keys", lambda self, prefix: iter(task_keys[prefix]))
+    sidecars = {
+        "2024-01-15-10-00-00_UMBRA-04": _sidecar("a1", "2024-01-15T10:00:00Z", (0, 0, 1, 1)),
+        "2024-02-20-10-00-00_UMBRA-04": _sidecar("a2", "2024-02-20T10:00:00Z", (0, 0, 1, 1)),
+        "2024-03-10-10-00-00_UMBRA-09": _sidecar("b1", "2024-03-10T10:00:00Z", (10, 10, 11, 11)),
+    }
+
+    def fake_get(self, url):
+        for stem, doc in sidecars.items():
+            if url.endswith(f"{stem}.stac.v2.json"):
+                return doc
+        raise KeyError(url)
+
+    monkeypatch.setattr(UmbraCatalog, "_get", fake_get)
+
+    cat = UmbraCatalog()
+    # Without the cap, both site-a revisits are returned.
+    assert sorted(i.id for i in cat.search(start="2024-01-01", end="2024-12-31")) == [
+        "a1",
+        "a2",
+        "b1",
+    ]
+    # With max_per_task=1, exactly one item per task.
+    items = list(cat.search(start="2024-01-01", end="2024-12-31", max_per_task=1))
+    assert len(items) == 2
+    assert {i.id for i in items} == {"a1", "b1"}
+
+
 def test_search_url_encodes_spaces_in_task_names(monkeypatch):
     """Named tasks like 'Allegiant Stadium' have spaces in their path;
     asset hrefs must be percent-encoded or rasterio/CURL rejects them."""

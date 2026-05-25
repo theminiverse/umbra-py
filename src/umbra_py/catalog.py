@@ -174,6 +174,7 @@ class UmbraCatalog:
         end: DateLike = None,
         product_types: list[str] | None = None,
         limit: int | None = None,
+        max_per_task: int | None = None,
     ) -> Iterator[UmbraItem]:
         """Yield items matching the filters.
 
@@ -192,6 +193,13 @@ class UmbraCatalog:
             (e.g. ``["GEC"]``).
         limit:
             Stop after yielding this many items.
+        max_per_task:
+            Cap the number of items yielded from any one
+            ``sar-data/tasks/<task>/`` directory. Each task is a tasking
+            campaign over the same area, so ``max_per_task=1`` swaps the
+            usual "every revisit of a few sites" output for "one
+            acquisition per distinct site" -- much better diversity on a
+            map.
         """
         start_d = _coerce_date(start)
         end_d = _coerce_date(end)
@@ -201,6 +209,7 @@ class UmbraCatalog:
 
         count = 0
         for task_prefix in task_subdirs:
+            per_task = 0
             for item in self._walk_task(task_prefix, start_d, end_d):
                 if bbox is not None and not item.intersects_bbox(bbox):
                     continue
@@ -208,8 +217,11 @@ class UmbraCatalog:
                     continue
                 yield item
                 count += 1
+                per_task += 1
                 if limit is not None and count >= limit:
                     return
+                if max_per_task is not None and per_task >= max_per_task:
+                    break
 
     def _walk_task(
         self,
