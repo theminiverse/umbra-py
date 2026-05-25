@@ -13,6 +13,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the same area, so `--max-per-task 1` swaps the usual "every revisit of
   a few sites" output for "one acquisition per distinct site" — much
   better diversity on a map.
+- `umbra map --imagery-max-size N` to control how big each SAR overlay
+  is read at. Default stays 1024 (modest HTML size); bump to 2048 or
+  4096 for sharper overlays at quadratically larger filesizes. Useful
+  when you want to zoom in on a single acquisition; remember SAR is
+  inherently speckled, so higher resolutions also reveal more noise.
+- A small 3-line satellite-orbit animation runs on stderr during
+  `umbra map` and `umbra search` to show the catalog walk is making
+  progress. Auto-suppressed when stderr isn't a TTY (CI, piped output)
+  so captured logs stay clean.
 
 ### Changed
 - **Breaking:** `UmbraCatalog.search` now walks Umbra's live data layout
