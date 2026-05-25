@@ -25,6 +25,7 @@ Install the optional dependency for the interactive map with::
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import warnings
@@ -157,12 +158,14 @@ def _popup_html(item: UmbraItem) -> str:
         f"<tr><th style='text-align:left;padding-right:8px'>{k}</th><td>{v}</td></tr>"
         for k, v in rows
     )
+    desc = item.description
+    desc_html = f"<p style='margin:6px 0 0;max-width:380px'>{html.escape(desc)}</p>" if desc else ""
     link = (
         f"<p style='margin-top:6px'><a href='{item.href}' target='_blank'>open STAC item</a></p>"
         if item.href
         else ""
     )
-    return f"<table style='font-family:sans-serif;font-size:12px'>{body}</table>{link}"
+    return f"<table style='font-family:sans-serif;font-size:12px'>{body}</table>{desc_html}{link}"
 
 
 def _centroid(item: UmbraItem) -> tuple[float, float] | None:
