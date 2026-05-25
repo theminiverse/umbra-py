@@ -7,15 +7,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- `UmbraCatalog.available_task_ids()` and `search(data_available_only=True)`:
-  list the public bucket's top-level `sar-data/tasks/<UUID>/` directories
-  and prune the v1 STAC walk to items whose `umbra:task_id` actually has
-  data published. Umbra's v1 STAC catalog is mostly metadata stubs (a
-  60-item search returned only 1 with reachable data); this filter lets
-  users get a map / list of only the items they can actually download.
-  Costs one extra paginated S3 listing on the first call (cached).
-- `umbra search --available-only` and `umbra map --available-only` CLI
-  flags wired through to the same filter.
+- `UmbraCatalog.search(max_per_task=N)` (and `--max-per-task N` on `umbra
+  search` / `umbra map`): cap how many items are yielded from any one
+  `sar-data/tasks/<task>/` directory. Each task is repeated imaging of
+  the same area, so `--max-per-task 1` swaps the usual "every revisit of
+  a few sites" output for "one acquisition per distinct site" — much
+  better diversity on a map.
+- `umbra map --imagery-max-size N` to control how big each SAR overlay
+  is read at. Default stays 1024 (modest HTML size); bump to 2048 or
+  4096 for sharper overlays at quadratically larger filesizes. Useful
+  when you want to zoom in on a single acquisition; remember SAR is
+  inherently speckled, so higher resolutions also reveal more noise.
+- A small 3-line satellite-orbit animation runs on stderr during
+  `umbra map` and `umbra search` to show the catalog walk is making
+  progress. Auto-suppressed when stderr isn't a TTY (CI, piped output)
+  so captured logs stay clean.
+
+### Changed
+- **Breaking:** `UmbraCatalog.search` now walks Umbra's live data layout
+  at `sar-data/tasks/<task>/[<uuid>/]<acquisition>/` (each acquisition has
+  a `*.stac.v2.json` sidecar) instead of the legacy `stac/catalog.json`
+  tree. The v1 tree is mostly metadata stubs that reference data Umbra
+  never published — a 60-item v1 search returned exactly one downloadable
+  item. The v2 walker enumerates the actual published acquisitions, so
+  every item returned has resolvable asset URLs. Date pruning still works:
+  acquisition directory names start with `YYYY-MM-DD-HH-MM-SS`, and the
+  walker skips subtrees outside the requested `start` / `end` range.
+  Provide a date range — without one the walker scans every published
+  acquisition, which takes minutes.
+- **Breaking:** `UmbraCatalog(root_url=...)` is gone. Configure the bucket
+  via `UmbraCatalog(bucket=..., region=...)` if you ever need a non-default
+  endpoint.
+
+### Removed
+- **Breaking:** `UmbraCatalog.available_task_ids()` and the
+  `search(data_available_only=...)` flag, plus the matching
+  `umbra search --available-only` / `umbra map --available-only` flags.
+  They were stopgaps that filtered the v1 walk; the v2 walker only ever
+  returns items whose data is published, so the filter is redundant.
+- **Breaking:** `umbra_py.constants.DEFAULT_STAC_ROOT` (was never publicly
+  re-exported).
+
+### Added
 - `umbra_py.viz` module for visualizing search results.
   - `item_to_feature`, `items_to_featurecollection`, `write_geojson`:
     convert items to GeoJSON for QGIS, leafmap, Earth Engine, geopandas,

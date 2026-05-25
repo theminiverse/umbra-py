@@ -9,6 +9,7 @@ import click
 
 from . import __version__
 from ._http import get_json
+from ._spinner import OrbitSpinner
 from .catalog import UmbraCatalog
 from .constants import DATA_LICENSE, PRODUCT_ASSETS
 from .download import download_item
@@ -57,15 +58,16 @@ def cli() -> None:
     help="Keep items exposing this asset (repeatable).",
 )
 @click.option("--limit", type=int, default=20, show_default=True, help="Max results.")
-@click.option("--json", "as_json", is_flag=True, help="Emit full STAC item JSON.")
 @click.option(
-    "--available-only",
-    is_flag=True,
-    help="Only return items whose binary data is actually downloadable "
-    "from the public bucket (most v1 STAC items reference data that was "
-    "never published).",
+    "--max-per-task",
+    type=int,
+    default=None,
+    help="Cap items per Umbra task directory. Each task is repeated imaging "
+    "of the same area, so '--max-per-task 1' returns one item per distinct "
+    "site rather than every revisit.",
 )
-def search(bbox, start, end, products, limit, as_json, available_only) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit full STAC item JSON.")
+def search(bbox, start, end, products, limit, max_per_task, as_json) -> None:
     """Search the catalog by area, date and product type."""
     catalog = UmbraCatalog()
     results = catalog.search(
@@ -74,18 +76,26 @@ def search(bbox, start, end, products, limit, as_json, available_only) -> None:
         end=end,
         product_types=list(products) or None,
         limit=limit,
-        data_available_only=available_only,
+        max_per_task=max_per_task,
     )
     found = 0
-    for item in results:
-        found += 1
-        if as_json:
-            click.echo(json.dumps(item.raw))
-        else:
-            click.echo(item.summary())
-            if item.href:
-                click.echo(f"  url      : {item.href}")
-            click.echo("")
+    spinner = OrbitSpinner("Searching Umbra archive")
+    spinner.__enter__()
+    try:
+        for item in results:
+            # Stop the spinner the moment we have something to print so the
+            # streaming output isn't fighting the animation's cursor moves.
+            spinner.stop()
+            found += 1
+            if as_json:
+                click.echo(json.dumps(item.raw))
+            else:
+                click.echo(item.summary())
+                if item.href:
+                    click.echo(f"  url      : {item.href}")
+                click.echo("")
+    finally:
+        spinner.stop()
     if not as_json:
         click.echo(f"{found} item(s).")
 
@@ -150,23 +160,42 @@ def download(item_url, assets, dest, overwrite) -> None:
     "needs the viz extra including rasterio).",
 )
 @click.option(
-    "--available-only",
-    is_flag=True,
-    help="Only include items whose binary data is actually downloadable.",
+    "--imagery-max-size",
+    type=int,
+    default=None,
+    help="Max pixel dimension of each SAR overlay. Default is 1024 -- bump "
+    "to 2048 or 4096 for sharper imagery at the cost of larger HTML output "
+    "(quadratic in size). SAR data is inherently grainy (speckle); higher "
+    "values reveal more detail but also more speckle noise.",
 )
-def map_cmd(bbox, start, end, products, limit, out_path, imagery, available_only) -> None:
+@click.option(
+    "--max-per-task",
+    type=int,
+    default=None,
+    help="Cap items per Umbra task directory. Each task is repeated imaging "
+    "of the same area, so '--max-per-task 1' returns one item per distinct "
+    "site rather than every revisit.",
+)
+def map_cmd(
+    bbox, start, end, products, limit, out_path, imagery, imagery_max_size, max_per_task
+) -> None:
     """Render search results as an interactive map or GeoJSON file."""
     catalog = UmbraCatalog()
-    items = list(
-        catalog.search(
-            bbox=_parse_bbox(bbox),
-            start=start,
-            end=end,
-            product_types=list(products) or None,
-            limit=limit,
-            data_available_only=available_only,
+    imagery_kwargs: dict | None = None
+    if imagery_max_size is not None:
+        imagery_kwargs = {"max_size": imagery_max_size}
+
+    with OrbitSpinner("Searching Umbra archive"):
+        items = list(
+            catalog.search(
+                bbox=_parse_bbox(bbox),
+                start=start,
+                end=end,
+                product_types=list(products) or None,
+                limit=limit,
+                max_per_task=max_per_task,
+            )
         )
-    )
     if not items:
         raise click.ClickException("No items matched the search.")
 
@@ -176,7 +205,12 @@ def map_cmd(bbox, start, end, products, limit, out_path, imagery, available_only
             raise click.ClickException("--imagery only applies to HTML map output.")
         path = write_geojson(items, out_path)
     elif lower.endswith(".html") or lower.endswith(".htm"):
-        path = save_footprint_map(items, out_path, imagery=imagery)
+        with OrbitSpinner(
+            f"Rendering {len(items)} footprint(s)" + (" with imagery" if imagery else "")
+        ):
+            path = save_footprint_map(
+                items, out_path, imagery=imagery, imagery_kwargs=imagery_kwargs
+            )
     else:
         raise click.ClickException(
             "Unrecognized output extension. Use .html for a map or .geojson for data."
