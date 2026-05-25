@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `umbra_py.timeline_map` / `save_timeline_map` and a matching `umbra
+  map --timeline` CLI flag: render search results as a
+  TimestampedGeoJson layer so Umbra's coverage accumulates beneath a
+  play button + slider. Each footprint surfaces at its acquisition
+  timestamp and keeps the same metadata popup as `footprint_map`.
+  Tunables: `period` (slider step, ISO 8601 — `"PT1H"`/`"P1D"`/`"P7D"`
+  match a day's / month's / year's search density), `duration` (how
+  long each footprint stays visible — `None` accumulates, an ISO
+  duration fades it back out), `auto_play`, `loop`, `transition_time`.
+  The CLI exposes `--timeline-period`; `--timeline` is rejected with
+  `--imagery` (animating base64 SAR rasters across the slider isn't
+  supported yet) or with non-HTML output extensions.
 - `UmbraCatalog.search(max_per_task=N)` (and `--max-per-task N` on `umbra
   search` / `umbra map`): cap how many items are yielded from any one
   `sar-data/tasks/<task>/` directory. Each task is repeated imaging of
