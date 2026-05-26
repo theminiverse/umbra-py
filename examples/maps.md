@@ -276,6 +276,13 @@ What the knobs do:
   Lower = snappier animation; raise it for a more deliberate pace.
 - **`tiles`, `color`, `weight`, `fill_opacity`, `zoom_start`** —
   identical to `footprint_map`.
+- **`geocode`, `geocode_zoom`** — identical to `footprint_map`. Each
+  footprint's centroid is reverse-geocoded via OpenStreetMap Nominatim
+  and the resulting place name appears as a "Location" row in the
+  popup. Off by default (so a library call doesn't make surprise
+  network requests); throttled to ~1 req/s and cached, so a 100-item
+  timeline takes ~100 s on first render and reruns are fast. The CLI's
+  `--geocode/--no-geocode` flag flows through to `--timeline` too.
 
 Items without a datetime *or* a geometry are silently skipped (they
 can't be placed on a time axis). Click any footprint mid-animation and

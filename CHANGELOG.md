@@ -15,10 +15,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Tunables: `period` (slider step, ISO 8601 — `"PT1H"`/`"P1D"`/`"P7D"`
   match a day's / month's / year's search density), `duration` (how
   long each footprint stays visible — `None` accumulates, an ISO
-  duration fades it back out), `auto_play`, `loop`, `transition_time`.
-  The CLI exposes `--timeline-period`; `--timeline` is rejected with
-  `--imagery` (animating base64 SAR rasters across the slider isn't
-  supported yet) or with non-HTML output extensions.
+  duration fades it back out), `auto_play`, `loop`, `transition_time`,
+  and `geocode` / `geocode_zoom` (same Nominatim reverse-geocoding
+  behavior as `footprint_map` — the resolved place name is baked into
+  the popup before it ships into the TimestampedGeoJson payload, since
+  the plugin renders properties verbatim). The CLI's existing
+  `--geocode/--no-geocode` flag now flows through to `--timeline` too.
+  `--timeline` is still rejected with `--imagery` (animating base64
+  SAR rasters across the slider is a separate, larger lift) or with
+  non-HTML output extensions.
 - `UmbraCatalog.search(max_per_task=N)` (and `--max-per-task N` on `umbra
   search` / `umbra map`): cap how many items are yielded from any one
   `sar-data/tasks/<task>/` directory. Each task is repeated imaging of

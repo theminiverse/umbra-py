@@ -252,8 +252,14 @@ def map_cmd(
                 "rasters across the slider isn't supported. Drop one."
             )
         if timeline:
-            with OrbitSpinner(f"Rendering {len(items)} acquisition(s) on timeline"):
-                path = save_timeline_map(items, out_path, period=timeline_period)
+            suffix = f" with geocoding ~{len(items)}s" if geocode else ""
+            with OrbitSpinner(f"Rendering {len(items)} acquisition(s) on timeline{suffix}"):
+                path = save_timeline_map(
+                    items,
+                    out_path,
+                    period=timeline_period,
+                    geocode=geocode,
+                )
         else:
             extras = []
             if imagery:

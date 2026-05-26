@@ -558,6 +558,8 @@ def timeline_map(
     auto_play: bool = True,
     loop: bool = False,
     transition_time: int = 400,
+    geocode: bool = False,
+    geocode_zoom: int = 10,
 ):
     """Build an animated timeline map of Umbra acquisitions.
 
@@ -598,6 +600,12 @@ def timeline_map(
     transition_time:
         Milliseconds between slider ticks during playback. Lower =
         faster animation.
+    geocode, geocode_zoom:
+        Same semantics as :func:`footprint_map` -- reverse-geocode each
+        footprint's centroid via OpenStreetMap Nominatim and surface
+        the resulting place name in the popup. Throttled to ~1 req/s
+        and cached, so a 100-item timeline takes ~100 s on first
+        render. Off by default to avoid surprise network traffic.
 
     Returns the underlying ``folium.Map``; ``.save("file.html")`` it
     or display it in Jupyter. Requires the ``viz`` extra.
@@ -606,21 +614,45 @@ def timeline_map(
     from folium.plugins import TimestampedGeoJson  # noqa: PLC0415
 
     items = list(items)
-    features: list[dict[str, Any]] = []
-    bbox_inputs: list[dict[str, Any]] = []
-
+    plottable: list[UmbraItem] = []
+    geoms: dict[str, dict[str, Any]] = {}
     for item in items:
         geom = _geometry_for(item)
-        dt = item.datetime
-        if geom is None or dt is None:
+        if geom is None or item.datetime is None:
             continue
+        plottable.append(item)
+        geoms[item.id] = geom
+
+    # Resolve geocoded labels before the popup HTML is baked into the
+    # TimestampedGeoJson feature properties -- the plugin renders the
+    # popup string verbatim, so the location row has to be present at
+    # generation time.
+    locations: dict[str, str] = {}
+    if geocode:
+        geocode_session = _require_session_for_geocoding()
+        for item in plottable:
+            center_ll = _centroid(item)
+            if center_ll is None:
+                continue
+            label = _reverse_geocode(
+                center_ll[0],
+                center_ll[1],
+                zoom=geocode_zoom,
+                session=geocode_session,
+            )
+            if label:
+                locations[item.id] = label
+
+    features: list[dict[str, Any]] = []
+    bbox_inputs: list[dict[str, Any]] = []
+    for item in plottable:
         features.append(
             {
                 "type": "Feature",
-                "geometry": geom,
+                "geometry": geoms[item.id],
                 "properties": {
-                    "times": [dt.isoformat()],
-                    "popup": _popup_html(item),
+                    "times": [item.datetime.isoformat()],
+                    "popup": _popup_html(item, location=locations.get(item.id)),
                     "id": item.id,
                     "style": {
                         "color": color,
