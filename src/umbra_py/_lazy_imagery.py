@@ -28,12 +28,18 @@ import html
 import json
 from typing import Any
 
-# Pinned to the latest releases at the time of writing. Bump these
-# deliberately -- COG decoding in the browser is a moving target and an
-# unpinned CDN URL can regress without warning.
+# Pinned to specific versions to keep release behavior reproducible.
+# Bump deliberately -- COG decoding in the browser is a moving target
+# and an unpinned CDN URL can regress without warning.
+#
+# Both URLs target the *exact* file the package's `unpkg` /`browser`
+# field in package.json points at -- naive guesses like
+# `dist/<pkg>.min.js` 404 on georaster-layer-for-leaflet, where the
+# real bundle lives several directories deep.
 _GEORASTER_JS = "https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js"
 _GEORASTER_LAYER_JS = (
-    "https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js"
+    "https://unpkg.com/georaster-layer-for-leaflet@3.10.0/"
+    "dist/v3/webpack/bundle/georaster-layer-for-leaflet.min.js"
 )
 
 

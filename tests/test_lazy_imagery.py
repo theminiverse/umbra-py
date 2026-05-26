@@ -69,6 +69,26 @@ def test_cdn_script_tags_pin_versions():
     assert re.search(r"georaster-layer-for-leaflet@\d+\.\d+", tags), tags
 
 
+def test_cdn_script_tags_use_published_bundle_paths():
+    """Catch the obvious-but-painful failure mode: a CDN URL whose
+    path doesn't correspond to a file the package actually publishes.
+
+    georaster-layer-for-leaflet's 3.x bundle, in particular, lives
+    several directories deep (``dist/v3/webpack/bundle/...``) rather
+    than the obvious ``dist/...``. If a future bump regresses the
+    path, the browser silently 404s and every popup shows ``SAR libs
+    unavailable``. Pin the path shape we depend on so this is caught
+    at unit-test time, not by users.
+    """
+    from umbra_py._lazy_imagery import cdn_script_tags
+
+    tags = cdn_script_tags()
+    assert "/dist/georaster.browser.bundle.min.js" in tags, tags
+    # The layer package's `browser`/`unpkg` field in package.json
+    # points at this exact nested path -- accept nothing shorter.
+    assert "/dist/v3/webpack/bundle/georaster-layer-for-leaflet.min.js" in tags, tags
+
+
 def test_driver_script_references_map_var():
     """The driver looks the Folium map up by its (random) JS variable
     name; if the substitution gets dropped, every click silently does
