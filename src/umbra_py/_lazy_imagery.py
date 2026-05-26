@@ -74,20 +74,24 @@ def driver_script(
         Contrast-stretch cuts, mirroring
         :func:`umbra_py.viz._stretch_to_rgba`'s defaults of ``(2, 98)``.
     sample_cap:
-        Maximum number of pixel samples to use when computing the
-        percentile cut in the browser. SAR overviews are typically a
-        few million pixels; sampling keeps the math sub-second on
-        modest hardware.
+        Target pixel budget for the stretch-sample window. The
+        browser fetches a ``sqrt(sample_cap) x sqrt(sample_cap)``
+        downsampled view of the raster (clamped to ``[64, 1024]``)
+        via ``georaster.getValues`` -- HTTP range requests against
+        the appropriate COG overview level, no full read. Picks the
+        percentile cuts off that sample. 100_000 (~316 x 316) keeps
+        the math sub-second on modest hardware.
 
     The returned snippet embeds the CDN URLs (pinned at module level)
     so a single ``<script>`` block injection from the Python side is
     enough -- no extra ``<head>`` plumbing.
     """
+    sample_dim = max(64, min(1024, int(sample_cap**0.5)))
     return _DRIVER_TEMPLATE.format(
         map_var=map_var,
         plo=percentile_low,
         phi=percentile_high,
-        sample_cap=sample_cap,
+        sample_dim=sample_dim,
         georaster_url=GEORASTER_JS,
         georaster_layer_url=GEORASTER_LAYER_JS,
     )
@@ -134,13 +138,18 @@ def _verbatim_url_set(*urls: str) -> dict[str, Any]:
 #     run AFTER Leaflet (already loaded), so georaster-layer-for-leaflet
 #     finds L.GridLayer when it tries to extend it.
 #  2. Once both scripts have fired their `onload`, parseGeoraster(url)
-#     streams the COG via HTTP range requests.
-#  3. Sample the pixel values to compute percentile cuts.
-#  4. Build a GeoRasterLayer whose pixelValuesToColorFn does the stretch
+#     opens the COG (only the headers are fetched at this point).
+#  3. fetchSample() pulls a downsampled view of the whole raster via
+#     georaster.getValues -- HTTP range requests against the right
+#     overview level, no full read. For COGs `georaster.values` is
+#     null/undefined, so the naive iterate-`values[0]` path returns
+#     no samples and fires "No valid SAR pixels".
+#  4. Sample the returned pixel values to compute percentile cuts.
+#  5. Build a GeoRasterLayer whose pixelValuesToColorFn does the stretch
 #     and emits transparent for invalid / non-positive pixels (matching
 #     _stretch_to_rgba in Python).
-#  5. Add to the map; cache the layer keyed by item id.
-#  6. Second click on the same button removes the layer.
+#  6. Add to the map; cache the layer keyed by item id.
+#  7. Second click on the same button removes the layer.
 _DRIVER_TEMPLATE = """
 (function() {{
   if (window.umbraToggleSarImage) {{ return; }}  // idempotent across re-renders
@@ -199,19 +208,39 @@ _DRIVER_TEMPLATE = """
     return sorted[idx];
   }}
 
-  function computeStretch(georaster) {{
-    var values = georaster.values && georaster.values[0];
-    if (!values) {{ return null; }}
+  function fetchSample(georaster) {{
+    // For COGs, georaster.values is null and pixels have to be fetched
+    // on demand via getValues, which range-reads the appropriate
+    // overview level. For small in-memory rasters, georaster.values is
+    // already populated; use it directly to dodge the round trip.
+    if (georaster.values && georaster.values[0] && georaster.values[0].length) {{
+      return Promise.resolve(georaster.values);
+    }}
+    if (typeof georaster.getValues !== 'function') {{
+      return Promise.reject(new Error(
+        'georaster source exposes neither preloaded values nor getValues()'));
+    }}
+    return georaster.getValues({{
+      left: georaster.xmin,
+      right: georaster.xmax,
+      bottom: georaster.ymin,
+      top: georaster.ymax,
+      width: {sample_dim},
+      height: {sample_dim},
+      resampleMethod: 'nearest'
+    }});
+  }}
+
+  function computeStretchFromValues(values, noDataValue) {{
+    if (!values || !values[0]) return null;
+    var band = values[0];
     var samples = [];
-    var step = Math.max(1, Math.floor(
-      (values.length * (values[0] ? values[0].length : 1)) / {sample_cap}));
-    var counter = 0;
-    for (var i = 0; i < values.length; i++) {{
-      var row = values[i];
+    for (var i = 0; i < band.length; i++) {{
+      var row = band[i];
+      if (!row) continue;
       for (var j = 0; j < row.length; j++) {{
-        if (counter++ % step !== 0) continue;
         var v = row[j];
-        if (isFinite(v) && v > 0 && v !== georaster.noDataValue) {{
+        if (isFinite(v) && v > 0 && v !== noDataValue) {{
           samples.push(v);
         }}
       }}
@@ -229,10 +258,14 @@ _DRIVER_TEMPLATE = """
     button.disabled = true;
     button.textContent = 'Loading SAR image…';
     button.setAttribute('data-state', 'loading');
+    var grRef = null;
     loadLibs().then(function() {{
       return parseGeoraster(url);
     }}).then(function(georaster) {{
-      var stretch = computeStretch(georaster);
+      grRef = georaster;
+      return fetchSample(georaster);
+    }}).then(function(sampleValues) {{
+      var stretch = computeStretchFromValues(sampleValues, grRef.noDataValue);
       if (!stretch) {{
         button.disabled = false;
         button.textContent = 'No valid SAR pixels';
@@ -240,11 +273,11 @@ _DRIVER_TEMPLATE = """
         return;
       }}
       var layer = new GeoRasterLayer({{
-        georaster: georaster,
+        georaster: grRef,
         opacity: 1.0,
         pixelValuesToColorFn: function(values) {{
           var v = values[0];
-          if (!isFinite(v) || v <= 0 || v === georaster.noDataValue) {{
+          if (!isFinite(v) || v <= 0 || v === grRef.noDataValue) {{
             return null;  // transparent
           }}
           var s = Math.max(0, Math.min(255,

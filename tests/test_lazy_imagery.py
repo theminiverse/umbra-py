@@ -120,6 +120,40 @@ def test_driver_script_lazy_loads_libs_and_references_map_var():
     assert "document.head.appendChild" in js
 
 
+def test_driver_script_fetches_sample_via_getValues():
+    """COG sources expose pixels only via ``georaster.getValues()``,
+    not via the preloaded ``georaster.values`` 3D array. The driver
+    must call ``getValues`` (or it'll fall through to "No valid SAR
+    pixels" for every Umbra COG, which it did before this fix).
+    """
+    from umbra_py import _lazy_imagery as li
+
+    js = li.driver_script(
+        map_var="m",
+        percentile_low=2.0,
+        percentile_high=98.0,
+        sample_cap=100_000,
+    )
+    assert "getValues" in js
+    # And the sample dimension is derived from sample_cap: sqrt(100k) ~ 316.
+    assert "width: 316" in js
+    assert "height: 316" in js
+
+
+def test_driver_script_sample_dim_is_clamped():
+    """Defensive: extreme sample_cap values must clamp to sensible
+    pixel-window dimensions so we don't make a 0x0 fetch or accidentally
+    pull the full raster."""
+    from umbra_py import _lazy_imagery as li
+
+    tiny = li.driver_script(map_var="m", percentile_low=2, percentile_high=98, sample_cap=4)
+    huge = li.driver_script(
+        map_var="m", percentile_low=2, percentile_high=98, sample_cap=10_000_000
+    )
+    assert "width: 64" in tiny  # floor
+    assert "width: 1024" in huge  # ceiling
+
+
 def test_footprint_map_lazy_imagery_emits_button_and_driver(sample_item_dict):
     """End-to-end: rendering with lazy_imagery=True must include the
     driver and a per-item button keyed by the item's id, AND must NOT
